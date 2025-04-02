@@ -1,0 +1,107 @@
+---
+title: 'Homework 4'
+header-includes:
+  - \usepackage{multirow}
+output:
+  pdf_document: default
+urlcolor: blue
+---
+
+```{r, include=FALSE}
+
+library(tidyverse)
+knitr::opts_chunk$set(tidy = FALSE)
+```
+
+## Context
+
+This assignment reinforces ideas in Module 4: Constrained Optimization. We focus specifically on implementing quantile regression and LASSO.
+
+
+## Due date and submission
+
+Please submit (via Canvas) a PDF containing a link to the web address of the GitHub repo containing your work for this assignment; git commits after the due date will cause the assignment to be considered late. Due date is Wednesday, 4/2 at 10:00AM.
+
+
+
+## Points
+
+```{r, echo = FALSE}
+tibble(
+  Problem = c("Problem 0", "Problem 1", "Problem 2", "Problem 3"),
+  Points = c(20, 20, 30, 30)
+) %>%
+  knitr::kable()
+```
+
+## Dataset 
+
+The dataset for this homework assignment is in the file `cannabis.rds`. It comes from a study conducted by researchers at the University of Colorado who are working to develop roadside tests for detecting driving impairment due to cannabis use.  In this study, researchers measured levels of THC—the main psychoactive ingredient in cannabis—in participants’ blood and then collected other biomarkers and had them complete a series of neurocognitive tests. The goal of the study is to understand the relationship between performance on these neurocognitive tests and the concentration of THC metabolites in the blood. 
+
+The dataset contains the following variables:
+
+* `id`: subject id
+* `t_mmr1`: Metabolite molar ratio—a measure of THC metabolites in the blood. This is the outcome variable.
+* `p_*`: variables with the `p_` prefix contain measurements related to pupil response to light. 
+* `i_*`: variables with the `i_` prefix were collected using an iPad and are derived from neurocognitive tests assessing reaction time, judgment, and short-term memory.
+* `h_*`: Variables related to heart rate and blood pressure.
+
+
+
+## Problem 0 
+
+This "problem" focuses on structure of your submission, especially the use git and GitHub for reproducibility, R Projects to organize your work, R Markdown to write reproducible reports, relative paths to load data from local files, and reasonable naming structures for your files.
+
+To that end:
+
+* Create a public GitHub repo + local R Project; I suggest naming this repo / directory bios731_hw4_YourLastName (e.g. bios731_hw4_wrobel for Julia)
+* Submit your whole project folder to GitHub 
+* Submit a PDF knitted from Rmd to Canvas. Your solutions to the problems here should be implemented in your .Rmd file, and your git commit history should reflect the process you used to solve these Problems.
+
+## Problem 1: Exploratory data analysis
+
+Perform some EDA for this data. Your EDA should explore the following questions:
+
+- What are $n$ and $p$ for this data?
+- What is the distribution of the outcome?
+- How correlated are variables in the dataset?
+
+Summarize key findings from your EDA in one paragraph and 2-3 figures or tables. 
+
+
+## Problem 2: Quantile regression
+
+Use linear programming to estimate the coefficients for a quantile regression. You need to write a
+function named `my_rq`, which takes a response vector $y$, a covariate matrix $X$ and quantile $\tau$ , and
+returns the estimated coefficients. Existing linear programming functions can be used directly to
+solve the LP problem (for example, `simplex` function in the `boot` package, or `lp` function in the `lpSolve`
+package). 
+
+* Use your function to model `t_mmr1` from the cannabis data using `p_change` (percent change in pupil diameter in response to light), `h_hr` (heart rate), and `i_composite_score` (a composite score of the ipad variables) as variables.
+* Compare your results with though estimated using the `rq` function in R at quantiles $\tau \in \{0.25, 0.5, 0.75\}$.
+* Compare with mean obtain using linear regression
+* Summarize findings
+
+
+When explaining your results, be sure to explain what LP method you used for estimating quantile regression.
+
+## Problem 3: Implementation of LASSO
+
+
+As illustrated in class, a LASSO problem can be rewritten as a quadratic programming problem.
+
+1. Many widely used QP solvers require that the matrix in the quadratic function for the second
+order term to be positive definite (such as `solve.QP` in the `quadprog` package). Rewrite the
+quadratic programming problem for LASSO in matrix form and show that the matrix is not
+positive definite, thus QP solvers like `solve.QP` cannot be used. 
+2. The `LowRankQP` function in the `LowRankQP` package can handle the non positive definite situation. Use the
+matrix format you derived above and `LowRankQP` to write your own function `my_lasso()` to
+estimate the coefficients for a LASSO problem. Your function needs to take three parameters:
+$Y$ (response), $X$ (predictor), and $lambda$ (tuning parameter), and return the estimated coefficients.
+
+
+* Use your function to model `log(t_mmr1)` from the cannabis data using all other variables as potential covariates in the model
+* Compare your results with those estimated using the `cv.glmnet` function in R from the `glmnet` package
+* Summarize findings
+
+The results will not be exactly the same because the estimation procedures are different, but trends (which variables are selected) should be similar.

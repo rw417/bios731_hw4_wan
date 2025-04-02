@@ -1,0 +1,313 @@
+---
+title: 'Homework 4'
+header-includes:
+  - \usepackage{multirow}
+output:
+  pdf_document: default
+urlcolor: blue
+---
+
+```{r, include=FALSE}
+
+library(tidyverse)
+library(kableExtra)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(corrplot)
+library(quantreg)
+
+knitr::opts_chunk$set(tidy = FALSE, echo=FALSE, message=FALSE, warning=FALSE)
+```
+
+## Context
+
+This assignment reinforces ideas in Module 4: Constrained Optimization. We focus specifically on implementing quantile regression and LASSO.
+
+
+## Due date and submission
+
+Please submit (via Canvas) a PDF containing a link to the web address of the GitHub repo containing your work for this assignment; git commits after the due date will cause the assignment to be considered late. Due date is Wednesday, 4/2 at 10:00AM.
+
+
+
+## Points
+
+```{r, echo = FALSE}
+tibble(
+  Problem = c("Problem 0", "Problem 1", "Problem 2", "Problem 3"),
+  Points = c(20, 20, 30, 30)
+) %>%
+  knitr::kable()
+```
+
+## Dataset 
+
+The dataset for this homework assignment is in the file `cannabis.rds`. It comes from a study conducted by researchers at the University of Colorado who are working to develop roadside tests for detecting driving impairment due to cannabis use.  In this study, researchers measured levels of THC—the main psychoactive ingredient in cannabis—in participants’ blood and then collected other biomarkers and had them complete a series of neurocognitive tests. The goal of the study is to understand the relationship between performance on these neurocognitive tests and the concentration of THC metabolites in the blood. 
+
+The dataset contains the following variables:
+
+* `id`: subject id
+* `t_mmr1`: Metabolite molar ratio—a measure of THC metabolites in the blood. This is the outcome variable.
+* `p_*`: variables with the `p_` prefix contain measurements related to pupil response to light. 
+* `i_*`: variables with the `i_` prefix were collected using an iPad and are derived from neurocognitive tests assessing reaction time, judgment, and short-term memory.
+* `h_*`: Variables related to heart rate and blood pressure.
+
+
+
+## Problem 0 
+
+This "problem" focuses on structure of your submission, especially the use git and GitHub for reproducibility, R Projects to organize your work, R Markdown to write reproducible reports, relative paths to load data from local files, and reasonable naming structures for your files.
+
+To that end:
+
+* Create a public GitHub repo + local R Project; I suggest naming this repo / directory bios731_hw4_YourLastName (e.g. bios731_hw4_wrobel for Julia)
+* Submit your whole project folder to GitHub 
+* Submit a PDF knitted from Rmd to Canvas. Your solutions to the problems here should be implemented in your .Rmd file, and your git commit history should reflect the process you used to solve these Problems.
+
+## Problem 1: Exploratory data analysis
+
+Perform some EDA for this data. Your EDA should explore the following questions:
+
+- What are $n$ and $p$ for this data?
+- What is the distribution of the outcome?
+- How correlated are variables in the dataset?
+
+Summarize key findings from your EDA in one paragraph and 2-3 figures or tables. 
+
+**ANSWER:** \\
+The data has 29 columns and 57 rows. The first two columns are participant ID and the response variable. So there are 27 predictor variables and 57 observations. In Figure 1 below, we see that the response variable, `t_mmr1` is zero for 29 of the 57 observations. After applying log-tranformation, the non-zero values of `t_mmr1` are approximately normally distributed. In Figure 2, we see that most variables are not highly correlated. The top 10 most correlated variables are shown in Table 1 below.
+
+\\
+
+**Figure 1:** Distribution of Metabolite Molar Ratio
+
+```{r EDA distribution, echo=FALSE}
+# This file contains the code for Exploratory Data Analysis of the dataset
+# Load the dataset
+cannabis <- readRDS(paste(here::here(), "02_cleaned_data/cannabis-2.rds", sep = "/"))
+
+#-----------------------------------------------------------------------------#
+# Distribution of the outcome variable ####
+#-----------------------------------------------------------------------------#
+# Density and Histogram of raw t_mmr1
+plot_hist <- ggplot(cannabis, aes(x = t_mmr1)) +
+  geom_histogram(aes(y=after_stat(count / sum(count))), bins=25, fill="lightgrey", color="black") +  # scale histogram y
+  geom_density(col = "maroon") +
+  labs(title = "Distribution of Metabolite Molar Ratio",
+       x = "Metabolite Molar Ratio",
+       y = "Density") +
+  theme_minimal()
+
+# Log-transformed t_mmr1
+plot_hist_log <- ggplot(cannabis, aes(x = log(t_mmr1+10e-6))) +
+  geom_histogram(aes(y=after_stat(count / sum(count))), bins=25, fill="lightgrey", color="black") +  # scale histogram y
+  geom_density(col = "maroon") +
+  labs(title = "Distribution of Log-Transformed Metabolite Molar Ratio",
+       subtitle = "Note: 10e-6 was added to avoid taking the logarithm of 0",
+       x = "Log Metabolite Molar Ratio",
+       y = "Density") +
+  theme_minimal()
+
+grid.arrange(plot_hist, plot_hist_log, ncol=2)
+```
+
+\\
+
+**Figure 2:** Correlation Plot of Variables
+
+```{r EDA corr plot, echo=FALSE}
+corr_matrix <- cor(cannabis[,-c(1)])
+corrplot(corr_matrix, method = "circle", 
+         type="lower", tl.cex=0.75, tl.col="black")
+```
+
+\\
+
+**Table 1:** Top 10 Correlated Variable Pairs
+```{r EDA corr table, echo=FALSE}
+
+corr_matrix[lower.tri(corr_matrix)] <- NA # Remove the lower triangle of corr_matrix
+corr_pairs <- as.data.frame(as.table(corr_matrix))
+names(corr_pairs) <- c("Var1", "Var2", "Corr")
+corr_pairs <- corr_pairs[corr_pairs$Var1 != corr_pairs$Var2,] # Remove corr==1
+corr_pairs <- corr_pairs[!is.na(corr_pairs$Corr),] # Remove corr=NA
+corr_pairs <- corr_pairs[order(-abs(corr_pairs$Corr)),]
+
+kable(head(corr_pairs, 10),
+      col.names = c("Variable 1", "Variable 2", "Correlation"),
+      row.names = FALSE,
+      format="latex",
+      booktabs = TRUE,
+      digits=3)
+
+
+```
+
+## Problem 2: Quantile regression
+
+Use linear programming to estimate the coefficients for a quantile regression. You need to write a
+function named `my_rq`, which takes a response vector $y$, a covariate matrix $X$ and quantile $\tau$ , and
+returns the estimated coefficients. Existing linear programming functions can be used directly to
+solve the LP problem (for example, `simplex` function in the `boot` package, or `lp` function in the `lpSolve`
+package). 
+
+* Use your function to model `t_mmr1` from the cannabis data using `p_change` (percent change in pupil diameter in response to light), `h_hr` (heart rate), and `i_composite_score` (a composite score of the ipad variables) as variables.
+* Compare your results with though estimated using the `rq` function in R at quantiles $\tau \in \{0.25, 0.5, 0.75\}$.
+* Compare with mean obtain using linear regression
+* Summarize findings
+
+When explaining your results, be sure to explain what LP method you used for estimating quantile regression.
+
+**ANSWER:** \\
+My `my_rq()` function uses the simplex method to solve the linear programming problem for quantile regression. The coefficients it computed are exactly the same as those from the `rq()` function in the `quantreg` package. Table 2 compares model coefficients of quantile regressions on the 0.25, 0.5, and 0.75 quantiles of $t_mmr1$ against linear regression, which is on the mean of $t_mmr1$. The coefficients of the quantile regressions are very different because $t_mmr1$ is heavily zero-inflated. Quantile regression is more robust against skewness in the data so it is the preferred method for this data set.
+
+\\
+
+**Table 2**: Comparison of Coefficients from Quantile Regression and Linear Regression
+```{r quantil reg}
+source(paste(here::here(), "/10_source/my_rq.R", sep=""))
+taus <- c(0.25, 0.5, 0.75)
+
+# my_rq
+my_rq_results = rq_results = data.frame(matrix(NA, nrow=length(taus), ncol=4))
+colnames(my_rq_results) = colnames(rq_results) <- c("Intercept", "p_change", "h_hr", "i_composite_score")
+for (i in seq_along(taus)) {
+  tau <- taus[i]
+  my_rq_results[i,] <- my_rq(
+    y = cannabis$t_mmr1, 
+    X = cannabis[, c("p_change", "h_hr", "i_composite_score")], 
+    tau = tau
+    )
+}
+
+# rq
+for(i in seq_along(taus)){
+  tau <- taus[i]
+  rq_results[i,] <- rq(
+    t_mmr1 ~ p_change + h_hr + i_composite_score, 
+    data = cannabis, tau = tau
+    )$coefficients
+}
+
+# linear regression
+lm_result <- lm(
+  t_mmr1 ~ p_change + h_hr + i_composite_score, 
+  data = cannabis
+  )$coefficients
+
+
+# Store in a Table
+my_rq_results <- cbind("my_rq", taus, my_rq_results)
+rq_results <- cbind("rq", taus, rq_results)
+lm_result <- cbind("lm", "NA", as.data.frame(t(lm_result)))
+
+names(my_rq_results) <- names(rq_results) <- names(lm_result) <- c("Method", "Tau", "Intercept", "p_change", "h_hr", "i_composite_score")
+
+results <- rbind(my_rq_results, rq_results, lm_result)
+# results_rounded <- cbind(results[,1:2],round(results[,3:6], 3))
+
+kable(results, 
+      col.names = c("Method", "Tau", "Intercept", "p_change", "h_hr", "i_composite_score"),
+      row.names = FALSE,
+      format="latex",
+      booktabs = TRUE,
+      digits=3)
+
+```
+
+
+
+## Problem 3: Implementation of LASSO
+
+
+As illustrated in class, a LASSO problem can be rewritten as a quadratic programming problem.
+
+1. Many widely used QP solvers require that the matrix in the quadratic function for the second
+order term to be positive definite (such as `solve.QP` in the `quadprog` package). Rewrite the
+quadratic programming problem for LASSO in matrix form and show that the matrix is not
+positive definite, thus QP solvers like `solve.QP` cannot be used. 
+
+**ANSWER:** \\
+
+$$
+\begin{aligned}
+&\ \ \ \ -\sum_i^n \left(y_i - \sum_j \beta_j^+ x_{ij} + \sum_j \beta_j^- x_{ij} \right)^2 \\
+&= - (Y - X\beta^+ + X\beta^-)^T(Y - X\beta^+ + X\beta^-) \\
+&= - (Y^TY - Y^TX\beta^+ + Y^TX\beta^- - \beta^{+T}X^TY + \beta^{+T}X^TX\beta^+ - \beta^{+T}X^TX\beta^- + \beta^{-T}X^TY - \beta^{-T}X^TX\beta^+ + \beta^{-T}X^TX\beta^-) \\
+&= - (Y^TY - 2\beta^{+T}X^TY + 2\beta^{-T}X^TY + \beta^{+T}X^TX\beta^+ - 2\beta^{+T}X^TX\beta^- + \beta^{-T}X^TX\beta^-) \\
+&= - (Y^TY - 2Y^TX(\beta^+ - \beta^-) + (\beta^+ - \beta^-)^T X^T X (\beta^+ - \beta^-)) \\
+\end{aligned}
+$$
+
+To see why $X^T X$ is positive semidefinite, let $X$ not have full rank. Then there exists some non-zero vector $v$ such that $Xv = 0$. Thus $v^T X^T X v = (Xv)^T Xv = 0$. Thus $X^T X$ is positive semidefinite.
+
+
+2. The `LowRankQP` function in the `LowRankQP` package can handle the non positive definite situation. Use the
+matrix format you derived above and `LowRankQP` to write your own function `my_lasso()` to
+estimate the coefficients for a LASSO problem. Your function needs to take three parameters:
+$Y$ (response), $X$ (predictor), and $lambda$ (tuning parameter), and return the estimated coefficients.
+
+* Use your function to model `log(t_mmr1)` from the cannabis data using all other variables as potential covariates in the model
+* Compare your results with those estimated using the `cv.glmnet` function in R from the `glmnet` package
+* Summarize findings
+
+The results will not be exactly the same because the estimation procedures are different, but trends (which variables are selected) should be similar.
+
+**ANSWER:** \\
+The `glmnet` and `cv.glmnet` functions use penalties instead of L1 constraints to shrink the coefficients. To make my LASSO function comparable with `glmnet`, I first ran `cv.glmnet` over a default set of penalty values. I then calculated the corresponding L1 constraints for those penalty values. I then used the calculated constraints to run my LASSO function. Table 3 below reports the models with the smallest cross-validated mean squared error from `glmnet` and my LASSO function.
+
+Both `glmnet` and my LASSO picked similar variables, with `glmnet` picking one more variable, `i_prop_failed2`. The model in `glmnet` with the smallest CV error has an L1 constraint of 5.586. On the other hand, the model in my LASSO with the smallest CV error has an L1 constraint of 0.181. Nevertheless, the CV MSEs are similar across both models.
+
+```{r lasso}
+source(paste(here::here(), "/10_source/my_lasso.R", sep=""))
+
+# First, run LASSO using glmnet.
+# glmnet shrinks coefficients using the penalty term instead of a constraint. 
+# With the results of glmnet, we can calculate the corresponding L1 constraints.
+library(glmnet)
+cv_lasso_glmnet <- cv.glmnet(
+  x=as.matrix(cannabis[,-c(1,2)]),
+  y=log(cannabis$t_mmr1+1e-6),
+  family="gaussian",
+  alpha=1
+  )
+
+# Compute L1 norm for all penalty lambdas
+glmnet_fits <- cv_lasso_glmnet$glmnet.fit
+l1_norms <- apply(abs(as.matrix(glmnet_fits$beta)), 2, sum)
+
+# Find the index of the lambda that gave the minimum mse
+lambda_min_index <- which(cv_lasso_glmnet$lambda == cv_lasso_glmnet$lambda.min)
+
+# Run my LASSO using the l1 norms we computed
+my_lasso_results <- cv.my_lasso(
+  y=log(cannabis$t_mmr1+1e-6), 
+  X=as.matrix(cannabis[,-c(1,2)]),
+  lambda_seq=l1_norms, 
+  k=10
+  )
+
+# Store in table
+lasso_table <- as.data.frame(
+  cbind( 
+    c(as.numeric(coef(cv_lasso_glmnet, s = "lambda.min")), l1_norms[lambda_min_index], cv_lasso_glmnet$cvm[lambda_min_index]),
+    c(my_lasso_results$beta_best, my_lasso_results$best_lambda, my_lasso_results$cv_errors[my_lasso_results$best_idx])
+  )
+)
+
+colnames(lasso_table) <- c("glmnet", "my_lasso")
+rownames(lasso_table) <- c(names(my_lasso_results$beta_best), "L1 Constraint", "MSE")
+
+# Use Kable
+kable(lasso_table, 
+      col.names = c("glmnet", "my_lasso"),
+      row.names = TRUE,
+      format="latex",
+      booktabs = TRUE,
+      digits=3)
+```
+
+
+
+
